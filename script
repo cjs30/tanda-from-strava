@@ -1,0 +1,79 @@
+// Edd's todo list:
+// handles adding extra lines to the very bottom of the spreadsheet automatically
+// generic version for just grabbing Strava information and dumping it in a spreadsheet
+// dashboard sheet
+// weekly/monthly summary sheets?
+// be able to handle 30 consecutive non-Run activites without going into an infinite loop
+
+function getStrava() {
+  // select the right spreadsheet and setup sheet to get started
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tab = ss.getSheetByName('Setup');
+  ss.setActiveSheet(tab);
+  // select the the 'athlete', who is known as the Strava Access Token is unique to them
+  var stravaAccessToken = tab.getRange(1,1).getValue();
+
+  // working in the Run sheet from now
+  var tab = ss.getSheetByName('Run');
+  ss.setActiveSheet(tab); 
+  
+  // for more info on Stava setup, e.g. the names of other activity types and what information is returned,
+  // see http://strava.github.io/api/v3/activities/
+  // filter out non-run activities
+  var activityType = "Run";
+  
+  // Stava returns 30(?) results at a time, so we want to loop round a few times
+  var newData = true;
+  while (newData){
+    // find the last cell with data
+    var bottomCell = tab.getRange("B3:B").getValues().filter(String).length;
+    var startCol = 1;
+    var startRow = 4;
+    var nextRow = tab.getRange(startRow,startCol,bottomCell).getLastRow();
+    var lastDate = tab.getRange(nextRow-1,startCol+1).getValue();
+    var lastTime = Math.round(lastDate.getTime()/1000);  // + 86400;
+
+    // construct the request to the Strava API
+    var requestData = 'after= ' + lastTime;
+    var url = 'https://www.strava.com/api/v3/athlete/activities?' + requestData;
+    var headers = {
+      'Authorization' : 'Bearer ' + stravaAccessToken
+    };  
+    var options = {
+      'method' : 'get',
+      'headers' : headers
+    };
+  
+    // Make the GET request and log the returned content.
+    var response = UrlFetchApp.fetch(url, options);
+    var data = JSON.parse(response.getContentText());
+    // if there is no new data then stop requesting data from Strava
+    if (data.length == 0) newData = false; 
+    
+    // parse the result from the server for the information we are after
+    // fields received from strava include = 'start_date_local,distance,moving_time,average_speed,average_heartrate,type'
+    var rows = [], working, date, datetime, distance, moving, hr;
+    for (i=0; i<data.length; i++){
+      working = data[i];
+      if (working.type == activityType){
+        // PDT is picked so that runs after 17:00 aren't moved forward a date in the date conversion....
+        // is this due to where the Google server is located?!
+        // will it still work during/after the clocks change? (5th Nov for PDT, 29th Oct for BST)
+        date = Utilities.formatDate(new Date(working.start_date_local),"PDT" ,"dd/MM/YYYY");
+        datetime = new Date(working.start_date);
+        distance = (working.distance/1000).toFixed(1);
+        moving = Math.floor(working.moving_time/3600) + ':' + Math.floor((working.moving_time % 3600) / 60) + ':' + Math.floor(working.moving_time % 60);
+        // make the HR show as blank, rather than "undefined", when there is no HR data
+        hr = working.average_heartrate == undefined ? "" : working.average_heartrate;
+        rows.push([date, datetime, distance, moving, hr]);
+      }
+    }
+  
+    // insert the data into the spreadsheet
+    if (rows.length > 0){
+      // make sure that the Time column in the spreadsheet is in the correct format
+      tab.getRange(nextRow,startCol+2,rows.length,1).setNumberFormat('HH:mm:ss');
+      tab.getRange(nextRow,startCol,rows.length,5).setValues(rows);
+    } 
+  }
+}
