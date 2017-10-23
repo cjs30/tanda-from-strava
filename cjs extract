@@ -1,0 +1,59 @@
+//globals
+spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+runtab = spreadsheet.getSheetByName('Run');
+Token = spreadsheet.getSheetByName('Setup').getRange(1,1).getValue();
+startCol = 1;
+startRow = 4;
+
+function getStrava()
+{
+  //get starting position and last entry time for query 
+  var nextRow = runtab.getRange("B"+startRow+":B").getValues().filter(String).length+startRow;
+  var datetime = new Date(runtab.getRange(nextRow-1,startCol+2).getValue());
+  var data=getActivities(datetime); //get some activities
+  
+  //if there is data write it to runtab
+  while (data.length > 0)
+  {
+    var rows=[], working, date, datetime, distance, elapse, pace, id, name, type, link, hrflag, mHR,speed, elevation, workout;
+    for (i=0; i<data.length; i++)//loop through the returned activities
+    {
+      var working = data[i];
+      var date = Utilities.formatDate(new Date(working.start_date_local),"PDT" ,"dd/MM/YYYY");
+      var datetime = new Date(working.start_date);
+      var distance = working.distance/1000;
+      var type = working.type; var elevation = working.total_elevation_gain; var workout=working.workout_type;
+      var id = working.id; var name=working.name; var description=working.description; var hrflag=working.has_heartrate; 
+      if(hrflag){var mHR = working.average_heartrate;}else{var mHR="";}
+      var elapse=working.moving_time/24/3600;
+      var speed=distance/elapse/24;      
+      var pace=elapse/distance;
+      var link= getLink(id);
+      rows.push([type, date, datetime, distance, elapse, pace, speed, name, workout, id, link, mHR, elevation]);      
+    }   
+    nextRow=writeToSheet(runtab, nextRow, startCol, rows);    
+    data=getActivities(datetime);//get some activities      
+  }
+}
+
+function writeToSheet(tab,row,col, values)//puts data on sheet and returns next row
+{
+  tab.getRange(row, col,values.length,values[0].length).setValues(values);
+  return row+values.length;
+}
+
+function getActivities(after)
+{
+  //get maximum number (200) activities
+  var url = 'https://www.strava.com/api/v3/athlete/activities?per_page=200&after=' + after.getTime()/1000;
+  var headers = {'Authorization' : 'Bearer ' + Token};  
+  var options = {'method' : 'get','headers' : headers};
+  var response = UrlFetchApp.fetch(url, options);
+  var data = JSON.parse(response.getContentText());
+  return (data);
+}
+
+function getLink(id)
+{
+ return ('=hyperlink("https://www.strava.com/activities/' + id + '", "link")');
+}
